@@ -5,10 +5,12 @@ use zip::write::FileOptions;
 use zip::ZipWriter;
 use anyhow::Result;
 use indicatif::{ProgressBar, ProgressStyle};
+use rayon::prelude::*;
+use std::sync::{Arc, Mutex};
 
 pub fn compress_files(files: &[String], output_path: &str, base_path: &str) -> Result<()> {
     let file = File::create(output_path)?;
-    let mut zip = ZipWriter::new(file);
+    let zip = Arc::new(Mutex::new(ZipWriter::new(file)));
     let options = FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
     let base = Path::new(base_path).canonicalize()?;
 
@@ -17,49 +19,46 @@ pub fn compress_files(files: &[String], output_path: &str, base_path: &str) -> R
         .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} {msg}")?
         .progress_chars("=>-"));
 
-    let mut total_original = 0u64;
-    let mut total_compressed = 0u64;
+    let total_original = Arc::new(Mutex::new(0u64));
 
-    for file_path in files {
+    files.par_iter().for_each(|file_path| {
         if let Ok(path) = Path::new(file_path).canonicalize() {
             if let Ok(name) = path.strip_prefix(&base) {
                 let name_str = name.to_string_lossy().replace('\\', "/");
 
                 if let Ok(metadata) = std::fs::metadata(&path) {
-                    total_original += metadata.len();
+                    *total_original.lock().unwrap() += metadata.len();
                 }
 
-                match zip.start_file(name_str.clone(), options) {
-                    Ok(_) => {
-                        if let Ok(mut f) = File::open(&path) {
-                            let mut buffer = [0; 8192];
-                            loop {
-                                match f.read(&mut buffer) {
-                                    Ok(0) => break,
-                                    Ok(n) => { zip.write_all(&buffer[..n])?; }
-                                    Err(_) => break,
-                                }
-                            }
+                if let Ok(mut f) = File::open(&path) {
+                    let mut buffer = Vec::new();
+                    if f.read_to_end(&mut buffer).is_ok() {
+                        let mut zip_lock = zip.lock().unwrap();
+                        if zip_lock.start_file(name_str.clone(), options).is_ok() {
+                            let _ = zip_lock.write_all(&buffer);
                             pb.set_message(name_str);
                             pb.inc(1);
                         }
                     }
-                    Err(_) => continue,
                 }
             }
         }
-    }
+    });
 
     pb.finish_with_message("Done");
 
-    let zip_file = zip.finish()?;
-    total_compressed = zip_file.metadata()?.len();
+    let mut zip_lock = zip.lock().unwrap();
+    let zip_file = zip_lock.finish()?;
+    let total_compressed = zip_file.metadata()?.len();
+    let total_orig = *total_original.lock().unwrap();
 
     println!("\nCompression Summary:");
-    println!("  Original size: {} bytes", total_original);
+    println!("  Original size: {} bytes", total_orig);
     println!("  Compressed size: {} bytes", total_compressed);
-    println!("  Compression ratio: {:.1}%",
-        (1.0 - total_compressed as f64 / total_original as f64) * 100.0);
+    if total_orig > 0 {
+        println!("  Compression ratio: {:.1}%",
+            (1.0 - total_compressed as f64 / total_orig as f64) * 100.0);
+    }
 
     Ok(())
 }
