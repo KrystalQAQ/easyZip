@@ -25,6 +25,78 @@ impl Config {
         }
     }
 
+    pub fn smart_detect(path: &str) -> Self {
+        let mut config = Self::default();
+
+        let project_path = Path::new(path);
+
+        // React
+        if project_path.join("package.json").exists() {
+            if let Ok(content) = fs::read_to_string(project_path.join("package.json")) {
+                if content.contains("\"react\"") {
+                    config.exclude_patterns.extend(vec![
+                        "build".to_string(),
+                        ".cache".to_string(),
+                    ]);
+                }
+
+                // Next.js
+                if content.contains("\"next\"") {
+                    config.exclude_patterns.extend(vec![
+                        ".next".to_string(),
+                        "out".to_string(),
+                    ]);
+                }
+
+                // Vue
+                if content.contains("\"vue\"") {
+                    config.exclude_patterns.push("dist".to_string());
+                }
+
+                // Nuxt
+                if content.contains("\"nuxt\"") {
+                    config.exclude_patterns.extend(vec![
+                        ".nuxt".to_string(),
+                        ".output".to_string(),
+                    ]);
+                }
+
+                // Vite
+                if content.contains("\"vite\"") {
+                    config.exclude_patterns.push("dist".to_string());
+                }
+            }
+        }
+
+        // Angular
+        if project_path.join("angular.json").exists() {
+            config.exclude_patterns.extend(vec![
+                "dist".to_string(),
+                ".angular".to_string(),
+            ]);
+        }
+
+        // Rust
+        if project_path.join("Cargo.toml").exists() {
+            config.exclude_patterns.push("target".to_string());
+        }
+
+        // Python
+        if project_path.join("requirements.txt").exists()
+            || project_path.join("pyproject.toml").exists() {
+            config.exclude_patterns.extend(vec![
+                "__pycache__".to_string(),
+                "*.pyc".to_string(),
+                ".venv".to_string(),
+                "venv".to_string(),
+            ]);
+        }
+
+        config.exclude_patterns.sort();
+        config.exclude_patterns.dedup();
+        config
+    }
+
     pub fn load_from_file(path: &str) -> Option<Self> {
         let config_path = Path::new(path).join(".easyzip.toml");
         if let Ok(content) = fs::read_to_string(config_path) {

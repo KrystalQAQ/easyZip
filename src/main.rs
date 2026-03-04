@@ -30,7 +30,10 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     let mut config = config::Config::load_from_file(&cli.source)
-        .unwrap_or_else(|| config::Config::default());
+        .unwrap_or_else(|| {
+            println!("Auto-detecting project type...");
+            config::Config::smart_detect(&cli.source)
+        });
 
     if let Some(exclude) = cli.exclude {
         for pattern in exclude.split(',') {
