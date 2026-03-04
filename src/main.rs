@@ -20,12 +20,17 @@ struct Cli {
     /// Additional exclude patterns (comma-separated)
     #[arg(long)]
     exclude: Option<String>,
+
+    /// Dry run - preview files without creating archive
+    #[arg(long)]
+    dry_run: bool,
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    let mut config = config::Config::default();
+    let mut config = config::Config::load_from_file(&cli.source)
+        .unwrap_or_else(|| config::Config::default());
 
     if let Some(exclude) = cli.exclude {
         for pattern in exclude.split(',') {
@@ -33,17 +38,25 @@ fn main() -> Result<()> {
         }
     }
 
-    let output = cli.output.unwrap_or_else(|| {
-        format!("backup_{}.zip", Local::now().format("%Y%m%d_%H%M%S"))
-    });
-
     println!("Scanning directory: {}", cli.source);
     let files = scanner::scan_directory(&cli.source, &config)?;
     println!("Found {} files to backup", files.len());
 
+    if cli.dry_run {
+        println!("\nDry run - files to be backed up:");
+        for file in &files {
+            println!("  {}", file);
+        }
+        return Ok(());
+    }
+
+    let output = cli.output.unwrap_or_else(|| {
+        format!("backup_{}.zip", Local::now().format("%Y%m%d_%H%M%S"))
+    });
+
     println!("Creating backup: {}", output);
     compressor::compress_files(&files, &output, &cli.source)?;
 
-    println!("Backup completed successfully!");
+    println!("\nBackup completed successfully!");
     Ok(())
 }
